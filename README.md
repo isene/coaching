@@ -42,6 +42,8 @@ ln -s "$PWD/target/release/coaching" ~/bin/coaching
 | n | A new note in the timeline, dated today |
 | N | A note of many lines, in your editor |
 | a | The calendar, in the timeline's place |
+| ← → d D, w W, m M, y Y, t | In the calendar: a day, a week, a month or a year on or back, and today, as in tock |
+| ↑ ↓ | In the calendar: the appointment before or after; the day goes with it |
 | x, Space | Tick a goal or a step, or clear the tick |
 | Enter | Open the file or web address in the line; else change the line |
 | e | Change the line |

@@ -138,9 +138,53 @@ pub fn month_after(year: i32, month: u32, by: i32) -> (i32, u32) {
     (n.div_euclid(12), n.rem_euclid(12) as u32 + 1)
 }
 
+/// A day as (year, month, day).
+pub type Day = (i32, u32, u32);
+
+pub fn day_of(ts: i64) -> Day {
+    let l = local(ts);
+    (l.year, l.month, l.day)
+}
+
+/// The day `by` days after (or before) this one.
+pub fn add_days((mut y, mut m, mut d): Day, by: i32) -> Day {
+    for _ in 0..by.unsigned_abs() {
+        if by > 0 {
+            d += 1;
+            if d > days_in(y, m) {
+                (y, m) = month_after(y, m, 1);
+                d = 1;
+            }
+        } else if d > 1 {
+            d -= 1;
+        } else {
+            (y, m) = month_after(y, m, -1);
+            d = days_in(y, m);
+        }
+    }
+    (y, m, d)
+}
+
+/// The same day `by` months on, or the month's last day when it is shorter.
+pub fn add_months((y, m, d): Day, by: i32) -> Day {
+    let (y, m) = month_after(y, m, by);
+    (y, m, d.min(days_in(y, m)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn days_and_months_are_added_across_their_ends() {
+        assert_eq!(add_days((2026, 11, 30), 1), (2026, 12, 1));
+        assert_eq!(add_days((2026, 12, 31), 1), (2027, 1, 1));
+        assert_eq!(add_days((2027, 1, 1), -1), (2026, 12, 31));
+        assert_eq!(add_days((2024, 2, 28), 1), (2024, 2, 29));
+        assert_eq!(add_days((2026, 11, 12), -7), (2026, 11, 5));
+        assert_eq!(add_months((2026, 1, 31), 1), (2026, 2, 28));
+        assert_eq!(add_months((2026, 3, 15), -12), (2025, 3, 15));
+    }
 
     #[test]
     fn months_have_their_days_and_first_weekdays() {

@@ -77,6 +77,7 @@ const PICK_BG: Rgb = (58, 58, 66);
 const CARD_H: usize = 8;
 const PIC_W: usize = 16;
 const KEYS: &str = "←→ person · Tab part · + add · n note · a calendar · x tick · Esc Claude · F1 keys · q quit";
+const CAL_KEYS: &str = "←→ day · w/W week · m/M month · y/Y year · t today · ↑↓ appointment · Tab part · Esc Claude · q quit";
 
 struct App {
     dir: PathBuf,
@@ -89,6 +90,8 @@ struct App {
     /// the person, and when tock last wrote.
     appts: Vec<cal::Appt>,
     appts_for: Option<(usize, Option<SystemTime>)>,
+    /// The day picked in the calendar; the months start at its month.
+    day: cal::Day,
     note: String,
     /// Claude under the page, when it started; `full` gives it the
     /// whole screen (Ctrl+Z).
@@ -113,7 +116,7 @@ fn main() {
         use std::os::unix::fs::DirBuilderExt;
         let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
     }
-    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 5], top: [0; 5], appts: Vec::new(), appts_for: None, note: String::new(), claude: None, full: false, dirty: true, display: None, shown: None };
+    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 5], top: [0; 5], appts: Vec::new(), appts_for: None, day: cal::day_of(cal::now()), note: String::new(), claude: None, full: false, dirty: true, display: None, shown: None };
     app.load_all();
     Crust::init();
     Crust::set_app_identity("coaching");
@@ -281,6 +284,7 @@ impl App {
             // Start at the next appointment to come.
             let now = cal::now();
             self.sel[CAL] = self.appts.iter().position(|a| a.end.max(a.start) >= now).unwrap_or(self.appts.len().saturating_sub(1));
+            self.day = cal::day_of(self.appts.get(self.sel[CAL]).map_or(now, |a| a.start));
         }
     }
 
@@ -432,6 +436,9 @@ impl App {
     /// A key for the page. True to quit.
     fn key(&mut self, key: &str) -> bool {
         self.note.clear();
+        if self.part == CAL && self.cal_key(key) {
+            return false;
+        }
         let n = self.count(self.part);
         let s = &mut self.sel[self.part];
         match key {
@@ -463,7 +470,34 @@ impl App {
             "F1" | "?" => self.help(),
             _ => {}
         }
+        // In the calendar, the day goes with the picked appointment.
+        if self.part == CAL && matches!(key, "UP" | "DOWN" | "HOME" | "END") {
+            if let Some(a) = self.appts.get(self.sel[CAL]) {
+                self.day = cal::day_of(a.start);
+            }
+        }
         false
+    }
+
+    /// A key that moves the picked day in the calendar, as in tock. The
+    /// list follows to the first appointment on or after that day.
+    fn cal_key(&mut self, key: &str) -> bool {
+        let d = self.day;
+        self.day = match key {
+            "RIGHT" | "d" => cal::add_days(d, 1),
+            "LEFT" | "D" => cal::add_days(d, -1),
+            "w" => cal::add_days(d, 7),
+            "W" => cal::add_days(d, -7),
+            "m" => cal::add_months(d, 1),
+            "M" => cal::add_months(d, -1),
+            "y" => cal::add_months(d, 12),
+            "Y" => cal::add_months(d, -12),
+            "t" => cal::day_of(cal::now()),
+            _ => return false,
+        };
+        let last = self.appts.len().saturating_sub(1);
+        self.sel[CAL] = self.appts.iter().position(|a| cal::day_of(a.start) >= self.day).unwrap_or(last);
+        true
     }
 
     fn turn_to(&mut self, who: usize) {
@@ -710,15 +744,15 @@ impl App {
         let sel = self.sel[CAL];
         let head = format!(" Calendar{} ", if self.appts.is_empty() { String::new() } else { format!("  {}/{}", sel + 1, self.appts.len()) });
         let mut rows = vec![format!("{}{}", style::rgb(&head, Some(DARK), Some(colour), "b"), " ".repeat(w.saturating_sub(crust::display_width(&head))))];
-        // The months start at the picked appointment's, or at this one.
-        let at = self.appts.get(sel).map(|a| cal::local(a.start)).unwrap_or(today);
-        let days: Vec<(i32, u32, u32)> = self.appts.iter().map(|a| { let l = cal::local(a.start); (l.year, l.month, l.day) }).collect();
+        // The months start at the picked day's.
+        let at = self.day;
+        let days: Vec<cal::Day> = self.appts.iter().map(|a| cal::day_of(a.start)).collect();
         let months = ((w + 2) / 23).clamp(1, 3);
         for r in 0..8 {
             let mut line = String::from(" ");
             for m in 0..months {
-                let (y, mo) = cal::month_after(at.year, at.month, m as i32);
-                line.push_str(&month_row(y, mo, r, colour, &days, (today.year, today.month, today.day), (at.year, at.month, at.day)));
+                let (y, mo) = cal::month_after(at.0, at.1, m as i32);
+                line.push_str(&month_row(y, mo, r, colour, &days, (today.year, today.month, today.day), at));
                 line.push_str("  ");
             }
             let used = 1 + months * 23;
@@ -845,7 +879,7 @@ impl App {
             out.clear();
             self.show_picture(pic, card_h);
         }
-        out.push_str(&foot(&self.note, KEYS, w, rows));
+        out.push_str(&foot(&self.note, if self.part == CAL { CAL_KEYS } else { KEYS }, w, rows));
         print!("{out}");
         std::io::stdout().flush().ok();
     }
@@ -882,6 +916,7 @@ impl App {
             ("+", "a new line in this part"),
             ("n", "a new note in the timeline, dated today"),
             ("a", "the calendar: the person's appointments in tock"),
+            ("in the calendar", "←→ d D day, w W week, m M month, y Y year, t today, ↑↓ appointment"),
             ("N", "a note of many lines, in your editor"),
             ("x  Space", "tick a goal or a step, or clear the tick"),
             ("Enter", "open the file or web address in the line (↗); else change it"),
@@ -970,8 +1005,10 @@ fn month_row(year: i32, month: u32, r: usize, colour: Rgb, days: &[(i32, u32, u3
                 let d = (year, month, day as u32);
                 let cell = format!("{day:>2}");
                 line.push_str(&if days.contains(&d) {
-                    // The picked appointment's day is underlined.
+                    // The picked day is underlined.
                     style::rgb(&cell, Some(DARK), Some(colour), if d == picked { "bu" } else { "b" })
+                } else if d == picked {
+                    style::rgb(&cell, Some(TEXT), Some(PICK_BG), if d == today { "bu" } else { "b" })
                 } else if d == today {
                     style::rgb(&cell, Some(TEXT), None, "bu")
                 } else {

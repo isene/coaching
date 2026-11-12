@@ -1,6 +1,6 @@
 [package]
 name = "coaching"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 description = "The people you coach: a card, goals, a roadmap and a timeline of notes for each, in the terminal"
 license = "Unlicense"

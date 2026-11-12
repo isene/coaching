@@ -36,7 +36,9 @@ names another.
 This folder has one text file per person, `<name>.txt`:
 
 - The lines before the first heading are the card, as `key: value`
-  (name, colour, picture, cv, email, calendar, and any other).
+  (name, colour, started, picture, cv, email, calendar, and any other).
+  `started` is the day the coaching began. The page shows the colour
+  everywhere, so the card leaves the `colour` line out.
 - `# Goals` and `# Roadmap`: one line each, with `[ ]` or `[x]` in front.
 - `# Timeline`: one note a line, the newest first, each starting with
   its date as YYYY-MM-DD.
@@ -76,8 +78,8 @@ const PICK_BG: Rgb = (58, 58, 66);
 /// The card: rows, and the cells its picture gets.
 const CARD_H: usize = 8;
 const PIC_W: usize = 16;
-const KEYS: &str = "←→ person · Tab part · + add · n note · a calendar · x tick · Esc Claude · F1 keys · q quit";
-const CAL_KEYS: &str = "←→ day · w/W week · m/M month · y/Y year · t today · ↑↓ appointment · Tab part · Esc Claude · q quit";
+const KEYS: &str = "Ctrl+←→ person · Tab part · + add · n note · a calendar · x tick · Esc Claude · F1 keys · q quit";
+const CAL_KEYS: &str = "Ctrl+←→ person · ←→ day · w/W week · m/M month · y/Y year · t today · ↑↓ appointment · Tab part · Esc Claude · q quit";
 
 struct App {
     dir: PathBuf,
@@ -447,6 +449,9 @@ impl App {
             "ESC" => self.focus(CLAUDE),
             "LEFT" if self.who > 0 => self.turn_to(self.who - 1),
             "RIGHT" if self.who + 1 < self.people.len() => self.turn_to(self.who + 1),
+            // Ctrl+← Ctrl+→ go round the people in a ring, from any part.
+            "C-LEFT" if !self.people.is_empty() => self.turn_to((self.who + self.people.len() - 1) % self.people.len()),
+            "C-RIGHT" if !self.people.is_empty() => self.turn_to((self.who + 1) % self.people.len()),
             "TAB" => self.focus((self.part + 1) % 6),
             "S-TAB" => self.focus((self.part + 5) % 6),
             "a" => self.focus(CAL),
@@ -677,7 +682,8 @@ impl App {
             return;
         }
         let mut p = Person::default();
-        p.parts[CARD] = vec![format!("name: {name}"), "colour: #f78c3c".into(), "picture: ".into(), "cv: ".into()];
+        p.parts[CARD] = vec![format!("name: {name}"), format!("started: {}", today()), "picture: ".into(), "cv: ".into()];
+        p.colour_hex = Some("#f78c3c".into());
         if let Err(e) = data::save(&path, &p) {
             self.note = format!("not saved: {e}");
             return;
@@ -909,7 +915,7 @@ impl App {
         let hdr = |s: &str| style::rgb(s, Some(colour), None, "b");
         let key = |s: &str| style::rgb(&format!("  {s:<18}"), Some(TEXT), None, "b");
         let lines = [
-            ("←  →", "the person before, the next one"),
+            ("Ctrl+←  Ctrl+→", "the person before, the next one, round in a ring (← → too)"),
             ("Tab  Shift+Tab", "the next part: card, goals, roadmap, timeline, calendar, Claude"),
             ("↑  ↓  Home  End", "the line in the part"),
             ("Shift+↑  Shift+↓", "move the line up or down"),

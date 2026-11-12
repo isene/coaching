@@ -3,6 +3,7 @@
 //! ```text
 //! name: Alice Example
 //! colour: #88aaff
+//! started: 2026-11-01
 //! picture: ~/Pictures/alice.jpg
 //! cv: ~/Documents/alice-cv.pdf
 //!
@@ -32,6 +33,9 @@ pub const HEADS: [&str; 4] = ["Card", "Goals", "Roadmap", "Timeline"];
 pub struct Person {
     /// The card, the goals, the roadmap and the timeline, an item per line.
     pub parts: [Vec<String>; 4],
+    /// The `colour:` line's value, kept off the card: the whole page
+    /// shows the colour, and `c` changes it.
+    pub colour_hex: Option<String>,
 }
 
 impl Person {
@@ -48,6 +52,13 @@ impl Person {
             if line.trim().is_empty() {
                 continue;
             }
+            if part == CARD && !line.starts_with([' ', '\t']) {
+                if let Some((k, v)) = line.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("colour")) {
+                    let _ = k;
+                    p.colour_hex = Some(v.trim().to_string());
+                    continue;
+                }
+            }
             // A line that starts with a space goes on with the item above.
             match p.parts[part].last_mut() {
                 Some(last) if line.starts_with([' ', '\t']) => {
@@ -62,13 +73,21 @@ impl Person {
 
     pub fn text(&self) -> String {
         let mut out = String::new();
+        let colour = self.colour_hex.as_ref().map(|c| format!("colour: {c}\n")).unwrap_or_default();
         for (i, items) in self.parts.iter().enumerate() {
             if i != CARD {
                 out.push_str(&format!("\n# {}\n", HEADS[i]));
             }
-            for item in items {
+            for (n, item) in items.iter().enumerate() {
                 out.push_str(&item.replace('\n', "\n  "));
                 out.push('\n');
+                // The colour goes back in the file under the first line.
+                if i == CARD && n == 0 {
+                    out.push_str(&colour);
+                }
+            }
+            if i == CARD && items.is_empty() {
+                out.push_str(&colour);
             }
         }
         out
@@ -76,6 +95,9 @@ impl Person {
 
     /// The value of a line `key: value` on the card.
     pub fn field(&self, key: &str) -> Option<&str> {
+        if key.eq_ignore_ascii_case("colour") {
+            return self.colour_hex.as_deref();
+        }
         self.parts[CARD].iter().find_map(|l| {
             let (k, v) = l.split_once(':')?;
             k.trim().eq_ignore_ascii_case(key).then_some(v.trim())
@@ -83,6 +105,10 @@ impl Person {
     }
 
     pub fn set_field(&mut self, key: &str, value: &str) {
+        if key.eq_ignore_ascii_case("colour") {
+            self.colour_hex = Some(value.to_string());
+            return;
+        }
         let line = format!("{key}: {value}");
         let at = self.parts[CARD].iter().position(|l| l.split_once(':').is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case(key)));
         match at {
@@ -223,7 +249,10 @@ mod tests {
         let mut p = Person::parse(ALICE);
         p.set_field("colour", "#112233");
         p.set_field("phone", "555 0100");
-        assert_eq!(p.parts[CARD], vec!["name: Alice Example", "colour: #112233", "cv: ~/Documents/alice-cv.pdf", "phone: 555 0100"]);
+        // The colour stays off the card, and goes back under the name.
+        assert_eq!(p.parts[CARD], vec!["name: Alice Example", "cv: ~/Documents/alice-cv.pdf", "phone: 555 0100"]);
+        assert_eq!(p.colour(), Some((0x11, 0x22, 0x33)));
+        assert!(p.text().starts_with("name: Alice Example\ncolour: #112233\ncv:"));
     }
 
     #[test]

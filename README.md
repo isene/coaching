@@ -34,7 +34,7 @@ ln -s "$PWD/target/release/coaching" ~/bin/coaching
 
 | Key | What it does |
 |---|---|
-| ← → | The person before, the next one |
+| Ctrl+← Ctrl+→ | The person before, the next one, round in a ring; ← → too, outside the calendar |
 | Tab, Shift+Tab | The next part: card, goals, roadmap, timeline, calendar, Claude |
 | ↑ ↓ Home End | The line in the part |
 | Shift+↑ Shift+↓ | Move the line up or down |
@@ -67,6 +67,7 @@ A person is one text file in `~/.coaching` (or in the folder
 ```text
 name: Alice Example
 colour: #66bbff
+started: 2026-11-01
 picture: ~/Pictures/alice.jpg
 cv: ~/Documents/alice-cv.pdf
 born: 1990
@@ -84,7 +85,9 @@ born: 1990
 2026-11-01 First call
 ```
 
-- The lines before the first heading are the card.
+- The lines before the first heading are the card. `started` is the day
+  the coaching began; a new person gets today. The card leaves out the
+  `colour` line, since the whole page shows the colour.
 - A line that starts with a space belongs to the line above it.
 - A link is a word that starts with `~/`, `/`, `http://` or `https://`.
   Put a path with spaces in `<angle brackets>`.

@@ -1,0 +1,253 @@
+//! One person, as a plain text file anyone can read and change by hand:
+//!
+//! ```text
+//! name: Alice Example
+//! colour: #88aaff
+//! picture: ~/Pictures/alice.jpg
+//! cv: ~/Documents/alice-cv.pdf
+//!
+//! # Goals
+//! [ ] Speak in front of fifty people
+//!
+//! # Roadmap
+//! [x] 2026-12 The first course
+//!
+//! # Timeline
+//! 2026-11-12 First session. Her plan is in ~/Documents/alice-plan.pdf
+//! ```
+//!
+//! The lines before the first heading are the card. A line under a
+//! heading is one item; a line that starts with a space or a tab belongs
+//! to the item above it.
+
+use std::path::{Path, PathBuf};
+
+pub const CARD: usize = 0;
+pub const GOALS: usize = 1;
+pub const ROADMAP: usize = 2;
+pub const TIMELINE: usize = 3;
+pub const HEADS: [&str; 4] = ["Card", "Goals", "Roadmap", "Timeline"];
+
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct Person {
+    /// The card, the goals, the roadmap and the timeline, an item per line.
+    pub parts: [Vec<String>; 4],
+}
+
+impl Person {
+    pub fn parse(text: &str) -> Person {
+        let mut p = Person::default();
+        let mut part = CARD;
+        for line in text.lines() {
+            if let Some(head) = line.strip_prefix("# ") {
+                if let Some(i) = HEADS.iter().position(|h| h.eq_ignore_ascii_case(head.trim())) {
+                    part = i;
+                    continue;
+                }
+            }
+            if line.trim().is_empty() {
+                continue;
+            }
+            // A line that starts with a space goes on with the item above.
+            match p.parts[part].last_mut() {
+                Some(last) if line.starts_with([' ', '\t']) => {
+                    last.push('\n');
+                    last.push_str(line.trim());
+                }
+                _ => p.parts[part].push(line.trim().to_string()),
+            }
+        }
+        p
+    }
+
+    pub fn text(&self) -> String {
+        let mut out = String::new();
+        for (i, items) in self.parts.iter().enumerate() {
+            if i != CARD {
+                out.push_str(&format!("\n# {}\n", HEADS[i]));
+            }
+            for item in items {
+                out.push_str(&item.replace('\n', "\n  "));
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// The value of a line `key: value` on the card.
+    pub fn field(&self, key: &str) -> Option<&str> {
+        self.parts[CARD].iter().find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            k.trim().eq_ignore_ascii_case(key).then_some(v.trim())
+        })
+    }
+
+    pub fn set_field(&mut self, key: &str, value: &str) {
+        let line = format!("{key}: {value}");
+        let at = self.parts[CARD].iter().position(|l| l.split_once(':').is_some_and(|(k, _)| k.trim().eq_ignore_ascii_case(key)));
+        match at {
+            Some(i) => self.parts[CARD][i] = line,
+            None => self.parts[CARD].push(line),
+        }
+    }
+
+    pub fn colour(&self) -> Option<(u8, u8, u8)> {
+        let hex = self.field("colour")?.trim_start_matches('#');
+        if hex.len() != 6 || !hex.is_ascii() {
+            return None;
+        }
+        let n = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+        Some((n(0)?, n(2)?, n(4)?))
+    }
+}
+
+/// A goal or a step with its box: (done, the text without the box).
+pub fn boxed(item: &str) -> (bool, &str) {
+    for (mark, done) in [("[x]", true), ("[X]", true), ("[ ]", false), ("[_]", false)] {
+        if let Some(rest) = item.strip_prefix(mark) {
+            return (done, rest.trim_start());
+        }
+    }
+    (false, item)
+}
+
+/// The item with its box ticked, or cleared when it was ticked.
+pub fn ticked(item: &str) -> String {
+    let (done, text) = boxed(item);
+    format!("{} {text}", if done { "[ ]" } else { "[x]" })
+}
+
+/// The first file or web address in a line: a word that starts with
+/// `~/`, `/`, `http://` or `https://`, or anything inside `<...>` (for a
+/// path with spaces in it).
+pub fn link(item: &str) -> Option<String> {
+    if let Some(a) = item.find('<') {
+        if let Some(b) = item[a..].find('>') {
+            let inner = item[a + 1..a + b].trim();
+            if is_link(inner) {
+                return Some(inner.to_string());
+            }
+        }
+    }
+    item.split_whitespace()
+        .map(|w| w.trim_matches(|c: char| matches!(c, ',' | ';' | '(' | ')' | '"' | '\'')).trim_end_matches('.'))
+        .find(|w| is_link(w))
+        .map(String::from)
+}
+
+fn is_link(w: &str) -> bool {
+    w.len() > 2 && (w.starts_with("~/") || w.starts_with('/') || w.starts_with("http://") || w.starts_with("https://"))
+}
+
+/// A path with `~/` as the home folder.
+pub fn real_path(link: &str) -> String {
+    match link.strip_prefix("~/") {
+        Some(rest) => home().join(rest).to_string_lossy().into_owned(),
+        None => link.to_string(),
+    }
+}
+
+pub fn home() -> PathBuf {
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+}
+
+/// Where the people are: `COACHING_DIR`, or `~/.coaching`.
+pub fn dir() -> PathBuf {
+    std::env::var_os("COACHING_DIR").map(PathBuf::from).unwrap_or_else(|| home().join(".coaching"))
+}
+
+/// The files of the people, by name.
+pub fn files(dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "txt"))
+        .collect();
+    v.sort();
+    v
+}
+
+/// A file name for a person: letters and digits, the rest as `-`.
+pub fn slug(name: &str) -> String {
+    let s: String = name.trim().chars().map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    s.trim_matches('-').to_string()
+}
+
+/// Write through a temporary file, so a crash never leaves half a file.
+pub fn save(path: &Path, p: &Person) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, p.text())?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Lines of at most `w` cells, broken between words.
+pub fn wrap(text: &str, w: usize) -> Vec<String> {
+    let w = w.max(8);
+    let mut out = Vec::new();
+    for para in text.split('\n') {
+        let mut line = String::new();
+        for word in para.split_whitespace() {
+            let need = crust::display_width(&line) + crust::display_width(word) + usize::from(!line.is_empty());
+            if need > w && !line.is_empty() {
+                out.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+        out.push(line);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALICE: &str = "name: Alice Example\ncolour: #88aaff\ncv: ~/Documents/alice-cv.pdf\n\n# Goals\n[ ] Speak in front of fifty people\n[x] Read a book a month\n\n# Roadmap\n[ ] 2026-12 The first course\n\n# Timeline\n2026-11-12 First session\n  She wants a plan, see <~/My Files/plan one.pdf>\n2026-11-01 We met\n";
+
+    #[test]
+    fn a_file_reads_and_writes_back_the_same() {
+        let p = Person::parse(ALICE);
+        assert_eq!(p.field("name"), Some("Alice Example"));
+        assert_eq!(p.colour(), Some((0x88, 0xaa, 0xff)));
+        assert_eq!(p.parts[GOALS].len(), 2);
+        assert_eq!(p.parts[TIMELINE].len(), 2);
+        assert_eq!(p.parts[TIMELINE][0], "2026-11-12 First session\nShe wants a plan, see <~/My Files/plan one.pdf>");
+        assert_eq!(p.text(), ALICE);
+        assert_eq!(Person::parse(&p.text()), p);
+    }
+
+    #[test]
+    fn a_field_is_changed_in_place_or_added() {
+        let mut p = Person::parse(ALICE);
+        p.set_field("colour", "#112233");
+        p.set_field("phone", "555 0100");
+        assert_eq!(p.parts[CARD], vec!["name: Alice Example", "colour: #112233", "cv: ~/Documents/alice-cv.pdf", "phone: 555 0100"]);
+    }
+
+    #[test]
+    fn a_box_is_ticked_and_cleared() {
+        assert_eq!(boxed("[x] Read"), (true, "Read"));
+        assert_eq!(boxed("Read"), (false, "Read"));
+        assert_eq!(ticked("[ ] Read"), "[x] Read");
+        assert_eq!(ticked("[x] Read"), "[ ] Read");
+        assert_eq!(ticked("Read"), "[x] Read");
+    }
+
+    #[test]
+    fn the_link_in_a_line_is_found() {
+        assert_eq!(link("cv: ~/Documents/alice-cv.pdf").as_deref(), Some("~/Documents/alice-cv.pdf"));
+        assert_eq!(link("See (https://example.com/a), then go on").as_deref(), Some("https://example.com/a"));
+        assert_eq!(link("the plan <~/My Files/plan one.pdf> is new").as_deref(), Some("~/My Files/plan one.pdf"));
+        assert_eq!(link("It is in /tmp/notes.txt.").as_deref(), Some("/tmp/notes.txt"));
+        assert_eq!(link("a / b, and 3 < 4 > 2"), None);
+    }
+
+    #[test]
+    fn long_text_breaks_between_words() {
+        assert_eq!(wrap("one two three four", 9), vec!["one two", "three", "four"]);
+        assert_eq!(wrap("a\nb", 20), vec!["a", "b"]);
+        assert_eq!(slug(" Alice Example! "), "alice-example");
+    }
+}

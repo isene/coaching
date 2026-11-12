@@ -1,0 +1,88 @@
+# coaching
+
+The people you coach, in the terminal. Part of the
+[Fe₂O₃ suite](https://isene.org/fe2o3/).
+
+Each person has one page:
+
+- a **card**: name, a picture shown on the page, a link to the CV, and
+  any other line you add;
+- their **goals**, each with a box to tick;
+- a **roadmap**: the steps you plan, each with a box to tick;
+- a **timeline**: dated notes, the newest first.
+
+The whole page takes the person's colour (the bar, the headings, the
+dates), so you see at a glance whose page is open.
+
+## Install
+
+```bash
+git clone https://github.com/isene/crust
+git clone https://github.com/isene/glow
+git clone https://github.com/isene/coaching
+cd coaching && cargo build --release
+ln -s "$PWD/target/release/coaching" ~/bin/coaching
+```
+
+## Keys
+
+| Key | What it does |
+|---|---|
+| ← → | The person before, the next one |
+| Tab, Shift+Tab | The next part: card, goals, roadmap, timeline |
+| ↑ ↓ Home End | The line in the part |
+| Shift+↑ Shift+↓ | Move the line up or down |
+| + | A new line in this part |
+| n | A new note in the timeline, dated today |
+| N | A note of many lines, in your editor |
+| x, Space | Tick a goal or a step, or clear the tick |
+| Enter | Open the file or web address in the line; else change the line |
+| e | Change the line |
+| E | The person's whole file in your editor |
+| Del, Ctrl+D | Delete the line |
+| c | The person's colour, picked in [prism](https://github.com/isene/prism) |
+| p | A new person |
+| F1 | The keys |
+| q, Esc | Quit |
+
+A line with a file or a web address in it has a ↗ in front. Enter opens
+it with `xdg-open`.
+
+## The files
+
+A person is one text file in `~/.coaching` (or in the folder
+`COACHING_DIR` names). You can write it by hand:
+
+```text
+name: Alice Example
+colour: #66bbff
+picture: ~/Pictures/alice.jpg
+cv: ~/Documents/alice-cv.pdf
+born: 1990
+
+# Goals
+[ ] Speak in front of fifty people without notes
+[x] Read a book a month
+
+# Roadmap
+[x] 2026-11 The first course
+[ ] 2027-01 The second course
+
+# Timeline
+2026-11-12 Second session. Her plan is in <~/My Files/plan one.pdf>
+2026-11-01 First call
+```
+
+- The lines before the first heading are the card.
+- A line that starts with a space belongs to the line above it.
+- A link is a word that starts with `~/`, `/`, `http://` or `https://`.
+  Put a path with spaces in `<angle brackets>`.
+- The picture shows in a terminal that shows images (kitty, glass);
+  elsewhere the card has text alone.
+- To remove a person, delete the file.
+
+The editor for `N` and `E` is `$VISUAL`, then `$EDITOR`, then scribe.
+
+## License
+
+Public domain ([Unlicense](LICENSE)).

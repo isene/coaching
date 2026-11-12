@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="back" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" style="stop-color:#23202b"/>
+      <stop offset="100%" style="stop-color:#0a0910"/>
+    </radialGradient>
+  </defs>
+  <circle cx="128" cy="128" r="124" fill="url(#back)"/>
+
+  <!-- a road of steps that climbs to a flag: the roadmap to a goal -->
+  <polyline points="48,190 92,190 92,156 136,156 136,122 180,122 180,88" fill="none"
+            stroke="#f74c00" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+  <g fill="#ffb066">
+    <circle cx="48" cy="190" r="11"/>
+    <circle cx="92" cy="156" r="11"/>
+    <circle cx="136" cy="122" r="11"/>
+  </g>
+  <line x1="180" y1="92" x2="180" y2="46" stroke="#ffb066" stroke-width="8" stroke-linecap="round"/>
+  <polygon points="184,48 222,62 184,78" fill="#f78c3c"/>
+</svg>

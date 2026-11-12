@@ -9,7 +9,10 @@ Each person has one page:
   any other line you add;
 - their **goals**, each with a box to tick;
 - a **roadmap**: the steps you plan, each with a box to tick;
-- a **timeline**: dated notes, the newest first.
+- a **timeline**: dated notes, the newest first;
+- a **calendar**: the person's appointments in
+  [tock](https://github.com/isene/tock), as months with the days lit
+  in the person's colour, and as a list.
 
 The whole page takes the person's colour (the bar, the headings, the
 dates), so you see at a glance whose page is open.
@@ -19,6 +22,7 @@ dates), so you see at a glance whose page is open.
 ```bash
 git clone https://github.com/isene/crust
 git clone https://github.com/isene/glow
+git clone https://github.com/isene/ferrite
 git clone https://github.com/isene/coaching
 cd coaching && cargo build --release
 ln -s "$PWD/target/release/coaching" ~/bin/coaching
@@ -29,19 +33,20 @@ ln -s "$PWD/target/release/coaching" ~/bin/coaching
 | Key | What it does |
 |---|---|
 | ← → | The person before, the next one |
-| Tab, Shift+Tab | The next part: card, goals, roadmap, timeline |
+| Tab, Shift+Tab | The next part: card, goals, roadmap, timeline, calendar |
 | ↑ ↓ Home End | The line in the part |
 | Shift+↑ Shift+↓ | Move the line up or down |
 | + | A new line in this part |
 | n | A new note in the timeline, dated today |
 | N | A note of many lines, in your editor |
+| a | The calendar, in the timeline's place |
 | x, Space | Tick a goal or a step, or clear the tick |
 | Enter | Open the file or web address in the line; else change the line |
 | e | Change the line |
 | E | The person's whole file in your editor |
 | Del, Ctrl+D | Delete the line |
 | c | The person's colour, picked in [prism](https://github.com/isene/prism) |
-| p | A new person |
+| p | A new person, then prism for the colour |
 | F1 | The keys |
 | q, Esc | Quit |
 
@@ -80,6 +85,17 @@ born: 1990
 - The picture shows in a terminal that shows images (kitty, glass);
   elsewhere the card has text alone.
 - To remove a person, delete the file.
+
+## The calendar
+
+`a` shows the appointments tock has for the person: every event with
+the person's full name or first name in its title, or the card's
+`email:` among its guests. A card line `calendar: word, other word`
+names the words to look for instead.
+
+The months start at the picked appointment; ↑ and ↓ walk the list, and
+it opens at the next one to come. Appointments are made in tock.
+coaching reads a copy of tock's store, so tock can stay open.
 
 The editor for `N` and `E` is `$VISUAL`, then `$EDITOR`, then scribe.
 

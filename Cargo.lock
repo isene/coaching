@@ -46,9 +46,10 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "coaching"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fe2o3-crust",
+ "fe2o3-ferrite",
  "fe2o3-glow",
  "libc",
 ]
@@ -132,6 +133,10 @@ dependencies = [
  "libc",
  "unicode-width",
 ]
+
+[[package]]
+name = "fe2o3-ferrite"
+version = "0.2.0"
 
 [[package]]
 name = "fe2o3-glow"

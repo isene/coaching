@@ -5,6 +5,7 @@
 //! notes. The whole screen takes the person's colour, so it is plain at
 //! a glance whose page is open.
 
+mod cal;
 mod data;
 
 use crust::{seq, style, Crust, Cursor, Input, Pane};
@@ -13,6 +14,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+/// The calendar: a fifth part, read from tock and never written.
+const CAL: usize = 4;
 type Rgb = (u8, u8, u8);
 const BASE: Rgb = (247, 140, 60);
 const TEXT: Rgb = (225, 225, 230);
@@ -23,15 +26,19 @@ const PICK_BG: Rgb = (58, 58, 66);
 /// The card: rows, and the cells its picture gets.
 const CARD_H: usize = 8;
 const PIC_W: usize = 16;
-const KEYS: &str = "←→ person · Tab part · + add · n note · x tick · Enter open/change · F1 all keys · q quit";
+const KEYS: &str = "←→ person · Tab part · + add · n note · a calendar · x tick · Enter open/change · F1 keys · q quit";
 
 struct App {
     dir: PathBuf,
     people: Vec<(PathBuf, Person, Option<SystemTime>)>,
     who: usize,
     part: usize,
-    sel: [usize; 4],
-    top: [usize; 4],
+    sel: [usize; 5],
+    top: [usize; 5],
+    /// The open person's appointments, and what they were read for:
+    /// the person, and when tock last wrote.
+    appts: Vec<cal::Appt>,
+    appts_for: Option<(usize, Option<SystemTime>)>,
     note: String,
     display: Option<glow::Display>,
     /// The picture on screen: its file and where it sits.
@@ -49,7 +56,7 @@ fn main() {
         use std::os::unix::fs::DirBuilderExt;
         let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
     }
-    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 4], top: [0; 4], note: String::new(), display: None, shown: None };
+    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 5], top: [0; 5], appts: Vec::new(), appts_for: None, note: String::new(), display: None, shown: None };
     app.load_all();
     Crust::init();
     Crust::set_app_identity("coaching");
@@ -126,7 +133,38 @@ impl App {
         }
     }
 
+    fn count(&self, part: usize) -> usize {
+        if part == CAL { self.appts.len() } else { self.items(part).len() }
+    }
+
+    /// Read the appointments, when the person or tock's file is new.
+    fn load_cal(&mut self) {
+        let store = cal::store();
+        let key = (self.who, cal::stamp(&store));
+        if self.appts_for == Some(key) {
+            return;
+        }
+        let fresh = self.appts_for.map(|k| k.0) != Some(self.who);
+        self.appts_for = Some(key);
+        let needles = self.person().map(cal::needles).unwrap_or_default();
+        match cal::load(&store, &needles) {
+            Ok(a) => self.appts = a,
+            Err(e) => {
+                self.appts.clear();
+                self.note = e;
+            }
+        }
+        if fresh {
+            // Start at the next appointment to come.
+            let now = cal::now();
+            self.sel[CAL] = self.appts.iter().position(|a| a.end.max(a.start) >= now).unwrap_or(self.appts.len().saturating_sub(1));
+        }
+    }
+
     fn items(&self, part: usize) -> &[String] {
+        if part >= CAL {
+            return &[];
+        }
         self.person().map(|p| p.parts[part].as_slice()).unwrap_or(&[])
     }
 
@@ -137,26 +175,31 @@ impl App {
     fn run(&mut self) {
         loop {
             self.reload();
-            for i in 0..4 {
-                self.sel[i] = self.sel[i].min(self.items(i).len().saturating_sub(1));
+            if self.part == CAL {
+                self.load_cal();
+            }
+            for i in 0..5 {
+                self.sel[i] = self.sel[i].min(self.count(i).saturating_sub(1));
             }
             self.draw();
             let Some(key) = Input::getchr(None) else { continue };
             self.note.clear();
-            let n = self.items(self.part).len();
+            let n = self.count(self.part);
             let s = &mut self.sel[self.part];
             match key.as_str() {
                 "q" | "ESC" | "C-Q" => return,
                 "LEFT" if self.who > 0 => self.turn_to(self.who - 1),
                 "RIGHT" if self.who + 1 < self.people.len() => self.turn_to(self.who + 1),
-                "TAB" => self.part = (self.part + 1) % 4,
-                "S-TAB" => self.part = (self.part + 3) % 4,
+                "TAB" => self.part = (self.part + 1) % 5,
+                "S-TAB" => self.part = (self.part + 4) % 5,
+                "a" => self.part = CAL,
                 "UP" => *s = s.saturating_sub(1),
                 "DOWN" if *s + 1 < n => *s += 1,
                 "HOME" => *s = 0,
                 "END" => *s = n.saturating_sub(1),
-                "S-UP" if *s > 0 => self.shift(-1),
-                "S-DOWN" if *s + 1 < n => self.shift(1),
+                "S-UP" if *s > 0 && self.part != CAL => self.shift(-1),
+                "S-DOWN" if *s + 1 < n && self.part != CAL => self.shift(1),
+                "+" if self.part == CAL => self.note = "An appointment is made in tock; it shows here when its title has the name".into(),
                 "+" => self.add(self.part),
                 "n" => self.add(TIMELINE),
                 "N" => self.long_note(),
@@ -175,8 +218,10 @@ impl App {
 
     fn turn_to(&mut self, who: usize) {
         self.who = who;
-        self.sel = [0; 4];
-        self.top = [0; 4];
+        self.sel = [0; 5];
+        self.top = [0; 5];
+        self.appts.clear();
+        self.appts_for = None;
     }
 
     fn shift(&mut self, by: isize) {
@@ -351,7 +396,11 @@ impl App {
         let who = self.people.iter().position(|x| x.0 == path).unwrap_or(0);
         self.turn_to(who);
         self.part = CARD;
-        self.note = format!("{name} is in {}; c picks a colour", path.display());
+        // Straight to prism, so the new person has a colour from the start.
+        self.pick_colour();
+        if self.note.is_empty() {
+            self.note = format!("{name} is in {}", path.display());
+        }
     }
 
     fn drop_picture(&mut self) {
@@ -393,6 +442,58 @@ impl App {
             rows.push(style::rgb(&fit("  nothing yet; + adds a line", w), Some(DIM), None, "i"));
         }
         rows.resize(h, " ".repeat(w));
+        rows
+    }
+
+    /// The calendar in the timeline's place: months with the days of
+    /// the appointments lit, then the appointments as a list.
+    fn cal_rows(&mut self, w: usize, h: usize) -> Vec<String> {
+        let colour = self.colour();
+        let now = cal::now();
+        let today = cal::local(now);
+        let sel = self.sel[CAL];
+        let head = format!(" Calendar{} ", if self.appts.is_empty() { String::new() } else { format!("  {}/{}", sel + 1, self.appts.len()) });
+        let mut rows = vec![format!("{}{}", style::rgb(&head, Some(DARK), Some(colour), "b"), " ".repeat(w.saturating_sub(crust::display_width(&head))))];
+        // The months start at the picked appointment's, or at this one.
+        let at = self.appts.get(sel).map(|a| cal::local(a.start)).unwrap_or(today);
+        let days: Vec<(i32, u32, u32)> = self.appts.iter().map(|a| { let l = cal::local(a.start); (l.year, l.month, l.day) }).collect();
+        let months = ((w + 2) / 23).clamp(1, 3);
+        for r in 0..8 {
+            let mut line = String::from(" ");
+            for m in 0..months {
+                let (y, mo) = cal::month_after(at.year, at.month, m as i32);
+                line.push_str(&month_row(y, mo, r, colour, &days, (today.year, today.month, today.day), (at.year, at.month, at.day)));
+                line.push_str("  ");
+            }
+            let used = 1 + months * 23;
+            rows.push(format!("{line}{}", " ".repeat(w.saturating_sub(used))));
+        }
+        rows.push(" ".repeat(w));
+        let room = h.saturating_sub(rows.len());
+        let top = &mut self.top[CAL];
+        *top = (*top).min(sel);
+        if room > 0 && sel >= *top + room {
+            *top = sel + 1 - room;
+        }
+        for (i, a) in self.appts.iter().enumerate().skip(*top).take(room) {
+            let l = cal::local(a.start);
+            let when = if a.all_day { "all day    ".to_string() } else {
+                let e = cal::local(a.end.max(a.start));
+                format!("{:02}:{:02}-{:02}:{:02}", l.hour, l.min, e.hour, e.min)
+            };
+            let bg = (i == sel).then_some(PICK_BG);
+            let past = a.end.max(a.start) < now;
+            let front = format!(" {:04}-{:02}-{:02} {} {when}  ", l.year, l.month, l.day, cal::DAYS[l.weekday as usize]);
+            let what = if a.place.is_empty() { a.title.clone() } else { format!("{} · {}", a.title, a.place) };
+            let fw = crust::display_width(&front);
+            rows.push(format!("{}{}", style::rgb(&front, Some(if past { DIM } else { colour }), bg, ""),
+                style::rgb(&fit(&what, w.saturating_sub(fw)), Some(if past { DIM } else { TEXT }), bg, "")));
+        }
+        if self.appts.is_empty() {
+            rows.push(style::rgb(&fit("  no appointment in tock with this name in its title", w), Some(DIM), None, "i"));
+        }
+        rows.resize(h, " ".repeat(w));
+        rows.truncate(h);
         rows
     }
 
@@ -479,7 +580,7 @@ impl App {
             let upper = body / 2;
             let mut rows_left = self.part_rows(GOALS, left.saturating_sub(1), upper);
             rows_left.extend(self.part_rows(ROADMAP, left.saturating_sub(1), body - upper));
-            let right = self.part_rows(TIMELINE, w.saturating_sub(left), body);
+            let right = if self.part == CAL { self.cal_rows(w.saturating_sub(left), body) } else { self.part_rows(TIMELINE, w.saturating_sub(left), body) };
             for i in 0..body {
                 out.push_str(&format!("{}{} {}", Cursor::at(1, (top + i) as u16), rows_left[i], right[i]));
             }
@@ -523,6 +624,7 @@ impl App {
             ("Shift+↑  Shift+↓", "move the line up or down"),
             ("+", "a new line in this part"),
             ("n", "a new note in the timeline, dated today"),
+            ("a", "the calendar: the person's appointments in tock"),
             ("N", "a note of many lines, in your editor"),
             ("x  Space", "tick a goal or a step, or clear the tick"),
             ("Enter", "open the file or web address in the line (↗); else change it"),
@@ -584,4 +686,41 @@ fn take_cells(s: &str, max: usize) -> String {
         out.push(c);
     }
     out
+}
+
+/// Row `r` of a month, 21 cells wide: its name, the weekdays, then six
+/// weeks. A day with an appointment has the person's colour behind it.
+fn month_row(year: i32, month: u32, r: usize, colour: Rgb, days: &[(i32, u32, u32)], today: (i32, u32, u32), picked: (i32, u32, u32)) -> String {
+    match r {
+        0 => {
+            let name = format!("{} {year}", cal::MONTHS[month as usize - 1]);
+            let pad = 21usize.saturating_sub(name.len());
+            style::rgb(&format!("{}{name}{}", " ".repeat(pad / 2), " ".repeat(pad - pad / 2)), Some(colour), None, "b")
+        }
+        1 => style::rgb("Mo Tu We Th Fr Sa Su ", Some(DIM), None, ""),
+        _ => {
+            let first = cal::first_weekday(year, month) as i32;
+            let last = cal::days_in(year, month) as i32;
+            let mut line = String::new();
+            for col in 0..7 {
+                let day = (r as i32 - 2) * 7 + col - first + 1;
+                if day < 1 || day > last {
+                    line.push_str("   ");
+                    continue;
+                }
+                let d = (year, month, day as u32);
+                let cell = format!("{day:>2}");
+                line.push_str(&if days.contains(&d) {
+                    // The picked appointment's day is underlined.
+                    style::rgb(&cell, Some(DARK), Some(colour), if d == picked { "bu" } else { "b" })
+                } else if d == today {
+                    style::rgb(&cell, Some(TEXT), None, "bu")
+                } else {
+                    style::rgb(&cell, Some(DIM), None, "")
+                });
+                line.push(' ');
+            }
+            line
+        }
+    }
 }

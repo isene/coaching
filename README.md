@@ -86,7 +86,8 @@ born: 1990
 ```
 
 - The lines before the first heading are the card. `started` is the day
-  the coaching began; a new person gets today. The card leaves out the
+  the coaching began; a new person gets today, and `e` on the line asks
+  for a new date as YYYY-MM-DD. The card leaves out the
   `colour` line, since the whole page shows the colour.
 - A line that starts with a space belongs to the line above it.
 - A link is a word that starts with `~/`, `/`, `http://` or `https://`.

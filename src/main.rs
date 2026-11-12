@@ -622,8 +622,17 @@ impl App {
             let (part, at, new) = (self.part, self.sel[self.part], lines.join("\n"));
             return self.change(|p| p.parts[part][at] = new);
         }
-        let Some(new) = ask(" ", &item).filter(|t| !t.is_empty()) else { return };
         let (part, at) = (self.part, self.sel[self.part]);
+        // The start date is asked for alone, and must be a real date.
+        if let Some(old) = item.strip_prefix("started:").filter(|_| part == CARD) {
+            let Some(day) = ask(" The coaching started, YYYY-MM-DD: ", old.trim()) else { return };
+            if !day.is_empty() && !cal::is_date(&day) {
+                self.note = format!("\"{day}\" is not a date as YYYY-MM-DD, such as {}", today());
+                return;
+            }
+            return self.change(|p| p.parts[part][at] = format!("started: {day}"));
+        }
+        let Some(new) = ask(" ", &item).filter(|t| !t.is_empty()) else { return };
         self.change(|p| p.parts[part][at] = new);
     }
 

@@ -165,6 +165,19 @@ pub fn add_days((mut y, mut m, mut d): Day, by: i32) -> Day {
     (y, m, d)
 }
 
+/// A real day written as YYYY-MM-DD.
+pub fn is_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r).filter(|t| t.bytes().all(|c| c.is_ascii_digit())).and_then(|t| t.parse::<u32>().ok());
+    match (num(0..4), num(5..7), num(8..10)) {
+        (Some(y), Some(m), Some(d)) => (1..=12).contains(&m) && d >= 1 && d <= days_in(y as i32, m),
+        _ => false,
+    }
+}
+
 /// The same day `by` months on, or the month's last day when it is shorter.
 pub fn add_months((y, m, d): Day, by: i32) -> Day {
     let (y, m) = month_after(y, m, by);
@@ -184,6 +197,17 @@ mod tests {
         assert_eq!(add_days((2026, 11, 12), -7), (2026, 11, 5));
         assert_eq!(add_months((2026, 1, 31), 1), (2026, 2, 28));
         assert_eq!(add_months((2026, 3, 15), -12), (2025, 3, 15));
+    }
+
+    #[test]
+    fn a_date_is_a_real_day_as_yyyy_mm_dd() {
+        assert!(is_date("2026-11-12"));
+        assert!(is_date("2024-02-29"));
+        assert!(!is_date("2026-02-29"));
+        assert!(!is_date("2026-13-01"));
+        assert!(!is_date("2026-1-12"));
+        assert!(!is_date("12.11.2026"));
+        assert!(!is_date("2026-11-1x"));
     }
 
     #[test]

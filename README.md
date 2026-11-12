@@ -54,7 +54,7 @@ ln -s "$PWD/target/release/coaching" ~/bin/coaching
 | F1 | The keys |
 | Esc | The keys to Claude; Tab there comes back to the page |
 | Ctrl+Z | Claude on the whole screen, and back |
-| q | Quit |
+| Q | Quit |
 
 A line with a file or a web address in it has a ↗ in front. Enter opens
 it with `xdg-open`.

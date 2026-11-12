@@ -78,8 +78,8 @@ const PICK_BG: Rgb = (58, 58, 66);
 /// The card: rows, and the cells its picture gets.
 const CARD_H: usize = 8;
 const PIC_W: usize = 16;
-const KEYS: &str = "Ctrl+←→ person · Tab part · + add · n note · a calendar · x tick · Esc Claude · F1 keys · q quit";
-const CAL_KEYS: &str = "Ctrl+←→ person · ←→ day · w/W week · m/M month · y/Y year · t today · ↑↓ appointment · Tab part · Esc Claude · q quit";
+const KEYS: &str = "Ctrl+←→ person · Tab part · + add · n note · a calendar · x tick · Esc Claude · F1 keys · Q quit";
+const CAL_KEYS: &str = "Ctrl+←→ person · ←→ day · w/W week · m/M month · y/Y year · t today · ↑↓ appointment · Tab part · Esc Claude · Q quit";
 
 struct App {
     dir: PathBuf,
@@ -444,9 +444,8 @@ impl App {
         let n = self.count(self.part);
         let s = &mut self.sel[self.part];
         match key {
-            "q" | "C-Q" => return true,
-            "ESC" if self.claude.is_none() => return true,
-            "ESC" => self.focus(CLAUDE),
+            "Q" => return true,
+            "ESC" if self.claude.is_some() => self.focus(CLAUDE),
             "LEFT" if self.who > 0 => self.turn_to(self.who - 1),
             "RIGHT" if self.who + 1 < self.people.len() => self.turn_to(self.who + 1),
             // Ctrl+← Ctrl+→ go round the people in a ring, from any part.
@@ -942,7 +941,7 @@ impl App {
             ("p", "a new person"),
             ("Esc", "the keys to Claude, under the page; Tab there comes back"),
             ("Ctrl+Z", "Claude on the whole screen, and back"),
-            ("q", "quit"),
+            ("Q", "quit"),
         ];
         self.drop_picture();
         Crust::clear_screen();

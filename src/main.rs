@@ -16,6 +16,56 @@ use std::time::SystemTime;
 
 /// The calendar: a fifth part, read from tock and never written.
 const CAL: usize = 4;
+/// Claude's pane under the page, the last stop of Tab.
+const CLAUDE: usize = 5;
+
+/// Claude's CLAUDE.md, written to the people's folder once; edits there stay.
+const BRIEF: &str = "# coaching's Claude pane
+
+You run in the lower part of coaching, a terminal app where the user
+keeps the people he coaches. The page of one person is above you: a
+card, goals, a roadmap, a timeline of notes and a calendar.
+
+When the user moves the keys to this pane, the next prompt starts with
+an <on-screen app=\"coaching\"> block: the person on the page, their
+file, and the line that was picked. Talk about that person unless he
+names another.
+
+## The files
+
+This folder has one text file per person, `<name>.txt`:
+
+- The lines before the first heading are the card, as `key: value`
+  (name, colour, picture, cv, email, calendar, and any other).
+- `# Goals` and `# Roadmap`: one line each, with `[ ]` or `[x]` in front.
+- `# Timeline`: one note a line, the newest first, each starting with
+  its date as YYYY-MM-DD.
+- A line that starts with two spaces belongs to the line above it.
+- A file or web address in a line is a link the user opens with Enter.
+  A path with spaces goes in <angle brackets>.
+
+Change a file in place; the page shows the change at once. Keep his
+wording when you tidy a note. Add a note at the top of the timeline
+with today's date. Never delete a note unless he asks.
+
+The calendar is read from tock and cannot be written here. To make an
+appointment, use the calendar skill.
+
+## Skills
+
+Read the skill before work it covers:
+
+- `scientology`: auditing, training, the Bridge, and any roadmap or
+  note that uses those terms.
+- `who`: finding out about a person from his own mail and the web.
+- `cv`: writing or redoing a CV.
+- `calendar`: appointments and reminders.
+- `kastrup`: his mail and messages with the person, and drafts to them.
+- `voice`: text written in his voice.
+
+These files are private. Nothing about a person leaves this machine
+unless he asks for it.
+";
 type Rgb = (u8, u8, u8);
 const BASE: Rgb = (247, 140, 60);
 const TEXT: Rgb = (225, 225, 230);
@@ -26,7 +76,7 @@ const PICK_BG: Rgb = (58, 58, 66);
 /// The card: rows, and the cells its picture gets.
 const CARD_H: usize = 8;
 const PIC_W: usize = 16;
-const KEYS: &str = "←→ person · Tab part · + add · n note · a calendar · x tick · Enter open/change · F1 keys · q quit";
+const KEYS: &str = "←→ person · Tab part · + add · n note · a calendar · x tick · Esc Claude · F1 keys · q quit";
 
 struct App {
     dir: PathBuf,
@@ -40,6 +90,12 @@ struct App {
     appts: Vec<cal::Appt>,
     appts_for: Option<(usize, Option<SystemTime>)>,
     note: String,
+    /// Claude under the page, when it started; `full` gives it the
+    /// whole screen (Ctrl+Z).
+    claude: Option<deck::app::App>,
+    full: bool,
+    /// The page must be drawn again.
+    dirty: bool,
     display: Option<glow::Display>,
     /// The picture on screen: its file and where it sits.
     shown: Option<(String, u16, u16)>,
@@ -48,7 +104,8 @@ struct App {
 fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("-v" | "--version") => return println!("coaching {}", env!("CARGO_PKG_VERSION")),
-        Some(_) => return println!("coaching: the people you coach. One text file per person in ~/.coaching\n(or in COACHING_DIR). Run it with no arguments; F1 lists the keys."),
+        Some("-n" | "--no-claude") => {}
+        Some(_) => return println!("coaching: the people you coach. One text file per person in ~/.coaching\n(or in COACHING_DIR). F1 lists the keys. -n runs it without the Claude pane."),
         None => {}
     }
     let dir = data::dir();
@@ -56,14 +113,79 @@ fn main() {
         use std::os::unix::fs::DirBuilderExt;
         let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
     }
-    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 5], top: [0; 5], appts: Vec::new(), appts_for: None, note: String::new(), display: None, shown: None };
+    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 5], top: [0; 5], appts: Vec::new(), appts_for: None, note: String::new(), claude: None, full: false, dirty: true, display: None, shown: None };
     app.load_all();
     Crust::init();
     Crust::set_app_identity("coaching");
     Crust::clear_screen();
+    if std::env::args().nth(1).is_none() {
+        match start_claude(&app.dir) {
+            Ok(c) => app.claude = Some(c),
+            Err(e) => app.note = format!("No Claude pane: {e}"),
+        }
+        Crust::set_app_identity("coaching");
+    }
+    app.whole();
     app.run();
     app.drop_picture();
-    Crust::cleanup();
+    match app.claude.take() {
+        Some(c) => {
+            keep(&app.dir, c.session_id());
+            deck::app::finish(c);
+        }
+        None => Crust::cleanup(),
+    }
+}
+
+/// Claude: deck in the people's folder, the same session each time (its
+/// id is kept in `.session` there), so Claude remembers what came before.
+fn start_claude(dir: &std::path::Path) -> Result<deck::app::App, String> {
+    let brief = dir.join("CLAUDE.md");
+    if !brief.exists() {
+        let _ = std::fs::write(&brief, BRIEF);
+    }
+    let kept = std::fs::read_to_string(dir.join(".session")).unwrap_or_default();
+    let id = kept.trim();
+    let app = if id.is_empty() {
+        deck::app::start(None, dir.to_str(), Some("coaching"))?
+    } else {
+        match deck::app::start(Some(id), None, Some("coaching")) {
+            Err(e) if e.starts_with("No ") => deck::app::start(None, dir.to_str(), Some("coaching"))?,
+            other => other?,
+        }
+    };
+    keep(dir, app.session_id());
+    Ok(app)
+}
+
+/// Keep the session id, and tag a new session #coaching in cc-sessions'
+/// bookmarks, where fleet and `cc coaching` find it.
+fn keep(dir: &std::path::Path, id: &str) {
+    let kept = std::fs::read_to_string(dir.join(".session")).unwrap_or_default();
+    if kept.trim() == id {
+        return;
+    }
+    let _ = std::fs::write(dir.join(".session"), id);
+    let file = data::home().join(".cc-sessions/bookmarks.json");
+    let Some(mut b) = std::fs::read_to_string(&file).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) else { return };
+    let Some(sessions) = b["sessions"].as_object_mut() else { return };
+    sessions.retain(|_, e| !e["tags"].as_array().is_some_and(|t| t.len() == 1 && t[0] == "coaching"));
+    for e in sessions.values_mut() {
+        if let Some(t) = e["tags"].as_array_mut() {
+            t.retain(|t| t != "coaching");
+        }
+    }
+    sessions.insert(id.into(), serde_json::json!({ "path": dir, "tags": ["coaching"] }));
+    let tmp = file.with_extension("json.tmp");
+    if let Ok(text) = serde_json::to_string_pretty(&b) {
+        if std::fs::write(&tmp, text).is_ok() {
+            let _ = std::fs::rename(&tmp, &file);
+        }
+    }
+}
+
+fn claude_label(focused: bool) -> String {
+    if focused { style::bold(&style::fg(" ▸ Claude", 156)) } else { style::fg(" Claude   (Tab or Esc: the keys here · Ctrl+Z: the whole screen)", 240) }
 }
 
 fn mtime(path: &std::path::Path) -> Option<SystemTime> {
@@ -106,6 +228,7 @@ impl App {
         if now != *m {
             *p = Person::parse(&std::fs::read_to_string(&*f).unwrap_or_default());
             *m = now;
+            self.dirty = true;
         }
     }
 
@@ -172,7 +295,71 @@ impl App {
         self.items(self.part).get(self.sel[self.part]).cloned()
     }
 
+    /// The rows the page has: all of them, or those above Claude.
+    fn page_rows(&self) -> u16 {
+        let (_, rows) = Crust::terminal_size();
+        if self.claude.is_none() || rows < 24 {
+            return rows;
+        }
+        rows - (rows * 2 / 5).max(10)
+    }
+
+    /// Everything drawn again from nothing: after a resize, an editor,
+    /// prism or the help.
+    fn whole(&mut self) {
+        Crust::clear_screen();
+        self.shown = None;
+        self.dirty = true;
+        let (_, rows) = Crust::terminal_size();
+        let top = self.page_rows();
+        let (full, keys) = (self.full, self.part == CLAUDE);
+        if let Some(c) = self.claude.as_mut() {
+            c.set_tab_line(Some(claude_label(keys || full)));
+            c.set_area(if full || top == rows { None } else { Some((top, rows - top, 0)) });
+            c.set_focus(keys || full);
+        }
+    }
+
+    /// The keys to a part of the page, or to Claude.
+    fn focus(&mut self, part: usize) {
+        // With no Claude, Tab goes round the page alone.
+        let part = match (part == CLAUDE && self.claude.is_none(), self.part == CARD) {
+            (true, true) => CAL,
+            (true, false) => CARD,
+            _ => part,
+        };
+        if part == CLAUDE && self.part != CLAUDE {
+            self.tell_claude();
+        }
+        self.part = part;
+        self.dirty = true;
+        if let Some(c) = self.claude.as_mut() {
+            c.set_tab_line(Some(claude_label(part == CLAUDE)));
+            c.set_focus(part == CLAUDE);
+        }
+    }
+
+    /// What is on the page, for Claude's next prompt.
+    fn tell_claude(&mut self) {
+        let Some((file, person, _)) = self.people.get(self.who) else { return };
+        let mut text = format!("The person on the page: {}\nTheir file: {}\n\n{}", Self::name(&self.people[self.who]), file.display(), person.text());
+        if let Some(line) = self.picked() {
+            text.push_str(&format!("\nThe line picked in {}: {line}\n", HEADS[self.part]));
+        }
+        if !self.appts.is_empty() && self.appts_for.map(|k| k.0) == Some(self.who) {
+            text.push_str("\nAppointments in tock:\n");
+            for a in &self.appts {
+                let l = cal::local(a.start);
+                text.push_str(&format!("{:04}-{:02}-{:02} {:02}:{:02} {}\n", l.year, l.month, l.day, l.hour, l.min, a.title));
+            }
+        }
+        if let Some(c) = self.claude.as_mut() {
+            c.attach("coaching", &text);
+        }
+    }
+
     fn run(&mut self) {
+        let mut size = Crust::terminal_size();
         loop {
             self.reload();
             if self.part == CAL {
@@ -181,39 +368,102 @@ impl App {
             for i in 0..5 {
                 self.sel[i] = self.sel[i].min(self.count(i).saturating_sub(1));
             }
-            self.draw();
-            let Some(key) = Input::getchr(None) else { continue };
-            self.note.clear();
-            let n = self.count(self.part);
-            let s = &mut self.sel[self.part];
-            match key.as_str() {
-                "q" | "ESC" | "C-Q" => return,
-                "LEFT" if self.who > 0 => self.turn_to(self.who - 1),
-                "RIGHT" if self.who + 1 < self.people.len() => self.turn_to(self.who + 1),
-                "TAB" => self.part = (self.part + 1) % 5,
-                "S-TAB" => self.part = (self.part + 4) % 5,
-                "a" => self.part = CAL,
-                "UP" => *s = s.saturating_sub(1),
-                "DOWN" if *s + 1 < n => *s += 1,
-                "HOME" => *s = 0,
-                "END" => *s = n.saturating_sub(1),
-                "S-UP" if *s > 0 && self.part != CAL => self.shift(-1),
-                "S-DOWN" if *s + 1 < n && self.part != CAL => self.shift(1),
-                "+" if self.part == CAL => self.note = "An appointment is made in tock; it shows here when its title has the name".into(),
-                "+" => self.add(self.part),
-                "n" => self.add(TIMELINE),
-                "N" => self.long_note(),
-                "x" | " " => self.tick(),
-                "ENTER" => self.open_or_edit(),
-                "e" => self.edit(),
-                "E" => self.whole_file(),
-                "DEL" | "C-D" => self.delete(),
-                "c" => self.pick_colour(),
-                "p" => self.new_person(),
-                "F1" | "?" => self.help(),
-                _ => {}
+            if self.claude.as_mut().is_some_and(|c| c.take_overdraw()) {
+                self.dirty = true;
+            }
+            if self.dirty && !self.full {
+                self.dirty = false;
+                self.draw();
+                if let Some(c) = self.claude.as_ref().filter(|_| self.part == CLAUDE) {
+                    c.place_cursor();
+                }
+            }
+            // Claude wakes the wait when its output arrives; with no
+            // Claude there is nothing to wake for but a key.
+            let wait = self.claude.as_ref().map_or(86400, |c| c.before_wait());
+            let key = Input::getchr(Some(wait));
+            let claude_keys = self.claude.is_some() && (self.part == CLAUDE || self.full);
+            match key.as_deref() {
+                None | Some("FOCUS_IN" | "FOCUS_OUT") => {
+                    if let Some(c) = self.claude.as_mut() {
+                        c.after_wait(key);
+                    }
+                }
+                Some("RESIZE") => {
+                    if Crust::terminal_size() != size {
+                        size = Crust::terminal_size();
+                        self.whole();
+                    }
+                    if let Some(c) = self.claude.as_mut() {
+                        c.after_wait(key);
+                    }
+                }
+                Some("C-Z") if self.claude.is_some() => {
+                    self.full = !self.full;
+                    if self.full && self.part != CLAUDE {
+                        self.tell_claude();
+                    }
+                    self.whole();
+                }
+                Some("TAB") if claude_keys && !self.full => self.focus(CARD),
+                Some("S-TAB") if claude_keys && !self.full => self.focus(CAL),
+                Some(_) if claude_keys => {
+                    if let Some(c) = self.claude.as_mut() {
+                        c.after_wait(key);
+                    }
+                }
+                Some(k) => {
+                    if self.key(k) {
+                        return;
+                    }
+                    self.dirty = true;
+                    // Claude's output is read here too, so it never waits.
+                    if let Some(c) = self.claude.as_mut() {
+                        c.after_wait(None);
+                    }
+                }
+            }
+            if self.claude.as_ref().is_some_and(|c| !c.running()) {
+                return;
             }
         }
+    }
+
+    /// A key for the page. True to quit.
+    fn key(&mut self, key: &str) -> bool {
+        self.note.clear();
+        let n = self.count(self.part);
+        let s = &mut self.sel[self.part];
+        match key {
+            "q" | "C-Q" => return true,
+            "ESC" if self.claude.is_none() => return true,
+            "ESC" => self.focus(CLAUDE),
+            "LEFT" if self.who > 0 => self.turn_to(self.who - 1),
+            "RIGHT" if self.who + 1 < self.people.len() => self.turn_to(self.who + 1),
+            "TAB" => self.focus((self.part + 1) % 6),
+            "S-TAB" => self.focus((self.part + 5) % 6),
+            "a" => self.focus(CAL),
+            "UP" => *s = s.saturating_sub(1),
+            "DOWN" if *s + 1 < n => *s += 1,
+            "HOME" => *s = 0,
+            "END" => *s = n.saturating_sub(1),
+            "S-UP" if *s > 0 && self.part != CAL => self.shift(-1),
+            "S-DOWN" if *s + 1 < n && self.part != CAL => self.shift(1),
+            "+" if self.part == CAL => self.note = "An appointment is made in tock; it shows here when its title has the name".into(),
+            "+" => self.add(self.part),
+            "n" => self.add(TIMELINE),
+            "N" => self.long_note(),
+            "x" | " " => self.tick(),
+            "ENTER" => self.open_or_edit(),
+            "e" => self.edit(),
+            "E" => self.whole_file(),
+            "DEL" | "C-D" => self.delete(),
+            "c" => self.pick_colour(),
+            "p" => self.new_person(),
+            "F1" | "?" => self.help(),
+            _ => {}
+        }
+        false
     }
 
     fn turn_to(&mut self, who: usize) {
@@ -281,7 +531,7 @@ impl App {
         Crust::cleanup();
         let ran = std::process::Command::new(editor()).arg(path).status();
         Crust::init();
-        Crust::clear_screen();
+        self.whole();
         if let Err(e) = ran {
             self.note = format!("{}: {e}", editor());
         }
@@ -344,7 +594,13 @@ impl App {
         self.note = format!("delete \"{}\"? y/n", take_cells(&first, 50));
         self.draw();
         self.note.clear();
-        if Input::getchr(None).as_deref() != Some("y") {
+        // Claude's output wakes the wait as a resize: not an answer.
+        let mut key = Input::getchr(None);
+        while matches!(key.as_deref(), Some("RESIZE" | "FOCUS_IN" | "FOCUS_OUT")) {
+            key = Input::getchr(None);
+        }
+        self.whole();
+        if key.as_deref() != Some("y") {
             return;
         }
         let (part, at) = (self.part, self.sel[self.part]);
@@ -364,7 +620,7 @@ impl App {
         let ran = std::process::Command::new("prism").arg("--pick").arg(format!("--out={}", out.display()))
             .arg(format!("#{r:02x}{g:02x}{b:02x}")).status();
         Crust::init();
-        Crust::clear_screen();
+        self.whole();
         let text = std::fs::read_to_string(&out).unwrap_or_default();
         let _ = std::fs::remove_file(&out);
         let hex = text.lines().find_map(|l| {
@@ -534,7 +790,8 @@ impl App {
     }
 
     fn draw(&mut self) {
-        let (cols, rows) = Crust::terminal_size();
+        let (cols, _) = Crust::terminal_size();
+        let rows = self.page_rows();
         let (w, h) = (cols as usize, rows as usize);
         let colour = self.colour();
         let mut out = String::new();
@@ -619,7 +876,7 @@ impl App {
         let key = |s: &str| style::rgb(&format!("  {s:<18}"), Some(TEXT), None, "b");
         let lines = [
             ("←  →", "the person before, the next one"),
-            ("Tab  Shift+Tab", "the next part: card, goals, roadmap, timeline"),
+            ("Tab  Shift+Tab", "the next part: card, goals, roadmap, timeline, calendar, Claude"),
             ("↑  ↓  Home  End", "the line in the part"),
             ("Shift+↑  Shift+↓", "move the line up or down"),
             ("+", "a new line in this part"),
@@ -633,7 +890,9 @@ impl App {
             ("Del  Ctrl+D", "delete the line"),
             ("c", "the person's colour, picked in prism"),
             ("p", "a new person"),
-            ("q  Esc", "quit"),
+            ("Esc", "the keys to Claude, under the page; Tab there comes back"),
+            ("Ctrl+Z", "Claude on the whole screen, and back"),
+            ("q", "quit"),
         ];
         self.drop_picture();
         Crust::clear_screen();
@@ -646,7 +905,7 @@ impl App {
         print!("{t}");
         std::io::stdout().flush().ok();
         Input::getchr(None);
-        Crust::clear_screen();
+        self.whole();
     }
 }
 

@@ -12,7 +12,8 @@ Each person has one page:
 - a **timeline**: dated notes, the newest first;
 - a **calendar**: the person's appointments in
   [tock](https://github.com/isene/tock), as months with the days lit
-  in the person's colour, and as a list.
+  in the person's colour, and as a list;
+- **Claude** in a pane under the page, told who is on the page.
 
 The whole page takes the person's colour (the bar, the headings, the
 dates), so you see at a glance whose page is open.
@@ -23,6 +24,7 @@ dates), so you see at a glance whose page is open.
 git clone https://github.com/isene/crust
 git clone https://github.com/isene/glow
 git clone https://github.com/isene/ferrite
+git clone https://github.com/isene/deck
 git clone https://github.com/isene/coaching
 cd coaching && cargo build --release
 ln -s "$PWD/target/release/coaching" ~/bin/coaching
@@ -33,7 +35,7 @@ ln -s "$PWD/target/release/coaching" ~/bin/coaching
 | Key | What it does |
 |---|---|
 | ← → | The person before, the next one |
-| Tab, Shift+Tab | The next part: card, goals, roadmap, timeline, calendar |
+| Tab, Shift+Tab | The next part: card, goals, roadmap, timeline, calendar, Claude |
 | ↑ ↓ Home End | The line in the part |
 | Shift+↑ Shift+↓ | Move the line up or down |
 | + | A new line in this part |
@@ -48,7 +50,9 @@ ln -s "$PWD/target/release/coaching" ~/bin/coaching
 | c | The person's colour, picked in [prism](https://github.com/isene/prism) |
 | p | A new person, then prism for the colour |
 | F1 | The keys |
-| q, Esc | Quit |
+| Esc | The keys to Claude; Tab there comes back to the page |
+| Ctrl+Z | Claude on the whole screen, and back |
+| q | Quit |
 
 A line with a file or a web address in it has a ↗ in front. Enter opens
 it with `xdg-open`.
@@ -96,6 +100,20 @@ names the words to look for instead.
 The months start at the picked appointment; ↑ and ↓ walk the list, and
 it opens at the next one to come. Appointments are made in tock.
 coaching reads a copy of tock's store, so tock can stay open.
+
+## Claude
+
+The lower part of the screen is [deck](https://github.com/isene/deck),
+a front for Claude Code. It needs `claude` installed; `coaching -n`
+runs without it.
+
+- When the keys move to the pane, Claude is told who is on the page:
+  the person's file, the picked line and the appointments.
+- Claude works in `~/.coaching`, so it reads and changes the files, and
+  the page shows a change at once.
+- It is the same session each time, tagged `#coaching`.
+- `~/.coaching/CLAUDE.md` says how the files are built and which skills
+  to read. It is written once; change it to suit you.
 
 The editor for `N` and `E` is `$VISUAL`, then `$EDITOR`, then scribe.
 

@@ -1,6 +1,6 @@
 [package]
 name = "coaching"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "The people you coach: a card, goals, a roadmap and a timeline of notes for each, in the terminal"
 license = "Unlicense"
@@ -12,6 +12,9 @@ crust = { version = "0.1", path = "../crust", package = "fe2o3-crust" }
 glow = { version = "0.1", path = "../glow", package = "fe2o3-glow" }
 ferrite = { version = "0.2", path = "../ferrite", package = "fe2o3-ferrite" }
 libc = "0.2"
+# The Claude pane under the page is deck.
+deck = { path = "../deck" }
+serde_json = "1"
 
 [profile.release]
 opt-level = 3

@@ -127,6 +127,50 @@ impl Person {
     }
 }
 
+/// The graph of an OCA test: cells wide per trait, and rows high.
+pub const OCA_STEP: usize = 3;
+pub const OCA_ROWS: usize = 5;
+
+impl Person {
+    /// The ten scores of the card's `oca:` line, traits A to J, each from
+    /// -100 to 100. Other words on the line (a date, say) are passed over.
+    pub fn oca(&self) -> Option<[i32; 10]> {
+        let v: Vec<i32> = self.field("oca")?
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter_map(|w| w.parse().ok())
+            .filter(|n| (-100..=100).contains(n))
+            .collect();
+        v.try_into().ok()
+    }
+}
+
+/// The scores as a line of braille dots, a row of text per row of cells.
+/// A cell the line does not cross is the empty braille cell.
+pub fn oca_graph(v: &[i32; 10]) -> Vec<String> {
+    let (w, h) = (10 * OCA_STEP * 2, OCA_ROWS * 4);
+    let mut dots = vec![false; w * h];
+    let at = |i: usize| ((OCA_STEP + i * OCA_STEP * 2) as i32, (100 - v[i]) * (h as i32 - 1) / 200);
+    for i in 0..9 {
+        let ((x0, y0), (x1, y1)) = (at(i), at(i + 1));
+        for x in x0..=x1 {
+            let y = y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+            dots[y as usize * w + x as usize] = true;
+        }
+    }
+    const BITS: [[u32; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
+    (0..OCA_ROWS).map(|r| (0..w / 2).map(|c| {
+        let mut bits = 0;
+        for (dx, col) in BITS.iter().enumerate() {
+            for (dy, bit) in col.iter().enumerate() {
+                if dots[(r * 4 + dy) * w + c * 2 + dx] {
+                    bits |= bit;
+                }
+            }
+        }
+        char::from_u32(0x2800 + bits).unwrap_or(' ')
+    }).collect()).collect()
+}
+
 /// A goal or a step with its box: (done, the text without the box).
 pub fn boxed(item: &str) -> (bool, &str) {
     for (mark, done) in [("[x]", true), ("[X]", true), ("[ ]", false), ("[_]", false)] {
@@ -253,6 +297,29 @@ mod tests {
         assert_eq!(p.parts[CARD], vec!["name: Alice Example", "cv: ~/Documents/alice-cv.pdf", "phone: 555 0100"]);
         assert_eq!(p.colour(), Some((0x11, 0x22, 0x33)));
         assert!(p.text().starts_with("name: Alice Example\ncolour: #112233\ncv:"));
+    }
+
+    #[test]
+    fn an_oca_line_gives_ten_scores_and_a_graph() {
+        let mut p = Person::parse(ALICE);
+        assert_eq!(p.oca(), None);
+        p.set_field("oca", "2026-11-10 100, 100 100 100 100 -100 -100 -100 -100 -100");
+        let v = p.oca().unwrap();
+        assert_eq!(v, [100, 100, 100, 100, 100, -100, -100, -100, -100, -100]);
+        let g = oca_graph(&v);
+        assert_eq!(g.len(), OCA_ROWS);
+        assert!(g.iter().all(|r| r.chars().count() == 10 * OCA_STEP));
+        // The line runs along the top at the left and along the bottom at the right.
+        let cell = |r: usize, c: usize| g[r].chars().nth(c).unwrap();
+        assert_ne!(cell(0, 4), '\u{2800}');
+        assert_eq!(cell(OCA_ROWS - 1, 4), '\u{2800}');
+        assert_ne!(cell(OCA_ROWS - 1, 25), '\u{2800}');
+        assert_eq!(cell(0, 25), '\u{2800}');
+        // Nine scores, or one out of range, is no test.
+        p.set_field("oca", "1 2 3 4 5 6 7 8 9");
+        assert_eq!(p.oca(), None);
+        p.set_field("oca", "1 2 3 4 5 6 7 8 9 150");
+        assert_eq!(p.oca(), None);
     }
 
     #[test]

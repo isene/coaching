@@ -36,7 +36,8 @@ names another.
 This folder has one text file per person, `<name>.txt`:
 
 - The lines before the first heading are the card, as `key: value`
-  (name, colour, started, picture, cv, email, calendar, and any other).
+  (name, colour, started, picture, cv, email, calendar, oca, and any other).
+  `oca:` has the ten scores of an OCA test, traits A to J, from -100 to 100.
   `started` is the day the coaching began. The page shows the colour
   everywhere, so the card leaves the `colour` line out.
 - `# Goals` and `# Roadmap`: one line each, with `[ ]` or `[x]` in front.
@@ -882,9 +883,15 @@ impl App {
             out.push_str(&format!("{}{}", Cursor::at(1, top as u16 - 1), seq::ERASE_EOL));
             let body = h.saturating_sub(top);
             let left = (w * 2 / 5).max(20).min(w);
-            let upper = body / 2;
-            let mut rows_left = self.part_rows(GOALS, left.saturating_sub(1), upper);
-            rows_left.extend(self.part_rows(ROADMAP, left.saturating_sub(1), body - upper));
+            // The OCA test, when the card has one and the page has room.
+            let mut rows_left = match self.person().and_then(Person::oca) {
+                Some(v) if body >= 20 => oca_rows(&v, colour, left.saturating_sub(1)),
+                _ => Vec::new(),
+            };
+            let rest = body - rows_left.len();
+            let upper = rest / 2;
+            rows_left.extend(self.part_rows(GOALS, left.saturating_sub(1), upper));
+            rows_left.extend(self.part_rows(ROADMAP, left.saturating_sub(1), rest - upper));
             let right = if self.part == CAL { self.cal_rows(w.saturating_sub(left), body) } else { self.part_rows(TIMELINE, w.saturating_sub(left), body) };
             for i in 0..body {
                 out.push_str(&format!("{}{} {}", Cursor::at(1, (top + i) as u16), rows_left[i], right[i]));
@@ -959,6 +966,34 @@ impl App {
 }
 
 /// The bar along the bottom: what just happened, or the keys.
+/// The OCA test as rows `w` cells wide: a heading, the line of the ten
+/// scores with a dim line at zero, the letters of the traits, a gap.
+fn oca_rows(v: &[i32; 10], colour: Rgb, w: usize) -> Vec<String> {
+    let mut rows = vec![style::rgb(&fit(" OCA ", w), Some(colour), None, "b")];
+    for (r, line) in data::oca_graph(v).iter().enumerate() {
+        let label = match r {
+            0 => "+100",
+            r if r == data::OCA_ROWS / 2 => "   0",
+            r if r == data::OCA_ROWS - 1 => "-100",
+            _ => "    ",
+        };
+        let mut row = style::rgb(&format!(" {label} "), Some(DIM), None, "");
+        for c in line.chars() {
+            row.push_str(&match c {
+                '\u{2800}' if r == data::OCA_ROWS / 2 => style::rgb("╌", Some(DIM), None, ""),
+                '\u{2800}' => " ".into(),
+                c => style::rgb(&c.to_string(), Some(colour), None, ""),
+            });
+        }
+        let used = 6 + 10 * data::OCA_STEP;
+        rows.push(if used > w { fit(" ", w) } else { row + &" ".repeat(w - used) });
+    }
+    let letters: String = ('A'..='J').map(|c| format!("{c:^w$}", w = data::OCA_STEP)).collect();
+    rows.push(style::rgb(&fit(&format!("      {letters}"), w), Some(DIM), None, ""));
+    rows.push(" ".repeat(w));
+    rows
+}
+
 fn foot(note: &str, keys: &str, w: usize, rows: u16) -> String {
     let version = format!("v{} ", env!("CARGO_PKG_VERSION"));
     let text = if note.is_empty() { keys } else { note };

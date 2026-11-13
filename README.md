@@ -94,6 +94,9 @@ born: 1990
   Put a path with spaces in `<angle brackets>`.
 - The picture shows in a terminal that shows images (kitty, glass);
   elsewhere the card has text alone.
+- A card line `oca: 20 -35 60 10 -80 45 0 30 -10 55` is an OCA test: ten
+  scores, traits A to J, each from -100 to 100. The page draws it as a
+  small graph under the picture. A date on the line is fine.
 - To remove a person, delete the file.
 
 ## The calendar

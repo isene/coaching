@@ -189,15 +189,12 @@ pub fn oca_graph(v: &[i32; 10]) -> Vec<String> {
     }).collect()).collect()
 }
 
-/// A colour per trait: A B C lighter than the person's colour, D light
-/// grey, E F G the colour itself, H I J darker.
+/// A colour per trait: A B C and H I J in the person's colour, D light
+/// grey, E F G darker.
 pub fn oca_shades(c: (u8, u8, u8)) -> [(u8, u8, u8); 10] {
-    let mix = |to: f64, k: f64| {
-        let m = |v: u8| (v as f64 + (to - v as f64) * k).round() as u8;
-        (m(c.0), m(c.1), m(c.2))
-    };
-    let (light, dark) = (mix(255.0, 0.5), mix(0.0, 0.45));
-    [light, light, light, (205, 205, 210), c, c, c, dark, dark, dark]
+    let m = |v: u8| (v as f64 * 0.55).round() as u8;
+    let dark = (m(c.0), m(c.1), m(c.2));
+    [c, c, c, (205, 205, 210), dark, dark, dark, c, c, c]
 }
 
 /// The scores as a smooth line in real pixels, on a see-through canvas
@@ -431,11 +428,11 @@ mod tests {
     #[test]
     fn the_pixel_graph_has_a_shade_per_group_and_stays_in_its_box() {
         let shades = oca_shades((0xff, 0x88, 0x00));
-        assert_eq!(shades[0], shades[2]);
-        assert_eq!(shades[4], (0xff, 0x88, 0x00));
+        assert_eq!(shades[0], (0xff, 0x88, 0x00));
+        assert_eq!(shades[0], shades[9]);
         assert_eq!(shades[3], (205, 205, 210));
+        assert_eq!(shades[4], shades[6]);
         assert_ne!(shades[0], shades[4]);
-        assert_ne!(shades[4], shades[7]);
         let v = [35, -20, 60, 10, -45, 70, 25, -10, 40, 55];
         let cv = oca_canvas(&v, &shades, Some((13, 28)));
         assert_eq!((cv.w, cv.h), (390, 140));

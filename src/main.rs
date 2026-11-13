@@ -105,6 +105,10 @@ struct App {
     display: Option<glow::Display>,
     /// The picture on screen: its file and where it sits.
     shown: Option<(String, u16, u16)>,
+    /// The OCA graph in pixels, on a display of its own so that it and
+    /// the picture come and go apart: the scores, the colour, the place.
+    oca_display: Option<glow::Display>,
+    oca_shown: Option<([i32; 10], Rgb, u16, u16)>,
 }
 
 fn main() {
@@ -119,7 +123,7 @@ fn main() {
         use std::os::unix::fs::DirBuilderExt;
         let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
     }
-    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 5], top: [0; 5], appts: Vec::new(), appts_for: None, day: cal::day_of(cal::now()), note: String::new(), claude: None, full: false, dirty: true, display: None, shown: None };
+    let mut app = App { dir, people: Vec::new(), who: 0, part: TIMELINE, sel: [0; 5], top: [0; 5], appts: Vec::new(), appts_for: None, day: cal::day_of(cal::now()), note: String::new(), claude: None, full: false, dirty: true, display: None, shown: None, oca_display: None, oca_shown: None };
     app.load_all();
     Crust::init();
     Crust::set_app_identity("coaching");
@@ -316,6 +320,7 @@ impl App {
     fn whole(&mut self) {
         Crust::clear_screen();
         self.shown = None;
+        self.oca_shown = None;
         self.dirty = true;
         let (_, rows) = Crust::terminal_size();
         let top = self.page_rows();
@@ -714,6 +719,11 @@ impl App {
                 d.clear_all();
             }
         }
+        if self.oca_shown.take().is_some() {
+            if let Some(d) = self.oca_display.as_mut() {
+                d.clear_all();
+            }
+        }
     }
 
     /// One part as rows of text: its heading, then the items from the
@@ -884,10 +894,14 @@ impl App {
             let body = h.saturating_sub(top);
             let left = (w * 2 / 5).max(20).min(w);
             // The OCA test, when the card has one and the page has room.
-            let mut rows_left = match self.person().and_then(Person::oca) {
-                Some(v) if body >= 20 => oca_rows(&v, colour, left.saturating_sub(1)),
-                _ => Vec::new(),
+            // In real pixels where the terminal shows pictures, in braille elsewhere.
+            let oca = self.person().and_then(Person::oca).filter(|_| body >= 20 && left > OCA_W);
+            let pixels = oca.is_some() && self.oca_display.get_or_insert_with(glow::Display::new).supported();
+            let mut rows_left = match oca {
+                Some(v) => oca_rows(&v, colour, left.saturating_sub(1), pixels),
+                None => Vec::new(),
             };
+            let graph = oca.filter(|_| pixels).map(|v| (v, colour, 7, top as u16 + 1));
             let rest = body - rows_left.len();
             let upper = rest / 2;
             rows_left.extend(self.part_rows(GOALS, left.saturating_sub(1), upper));
@@ -899,6 +913,7 @@ impl App {
             print!("{out}");
             out.clear();
             self.show_picture(pic, card_h);
+            self.show_oca(graph);
         }
         out.push_str(&foot(&self.note, if self.part == CAL { CAL_KEYS } else { KEYS }, w, rows));
         print!("{out}");
@@ -922,6 +937,26 @@ impl App {
         let d = self.display.get_or_insert_with(glow::Display::new);
         if d.supported() && d.show(&path, 3, 3, pw, ph) {
             self.shown = Some((path, pw, ph));
+        }
+    }
+
+    /// Put the OCA graph up, only when it is not the one already there.
+    fn show_oca(&mut self, want: Option<([i32; 10], Rgb, u16, u16)>) {
+        if want == self.oca_shown {
+            return;
+        }
+        let Some(d) = self.oca_display.as_mut() else { return };
+        match want {
+            Some((v, colour, x, y)) => {
+                std::io::stdout().flush().ok();
+                if d.swap_canvas(&data::oca_canvas(&v, &data::oca_shades(colour), None), x, y) {
+                    self.oca_shown = want;
+                }
+            }
+            None => {
+                d.clear_all();
+                self.oca_shown = None;
+            }
         }
     }
 
@@ -966,9 +1001,15 @@ impl App {
 }
 
 /// The bar along the bottom: what just happened, or the keys.
+/// The cells the OCA graph takes with its numbers at the left.
+const OCA_W: usize = 6 + 10 * data::OCA_STEP;
+
 /// The OCA test as rows `w` cells wide: a heading, the line of the ten
 /// scores with a dim line at zero, the letters of the traits, a gap.
-fn oca_rows(v: &[i32; 10], colour: Rgb, w: usize) -> Vec<String> {
+/// Each trait has the shade of its group. With `pixels` the graph's
+/// cells stay empty, for the picture that goes over them.
+fn oca_rows(v: &[i32; 10], colour: Rgb, w: usize, pixels: bool) -> Vec<String> {
+    let shades = data::oca_shades(colour);
     let mut rows = vec![style::rgb(&fit(" OCA ", w), Some(colour), None, "b")];
     for (r, line) in data::oca_graph(v).iter().enumerate() {
         let label = match r {
@@ -978,18 +1019,21 @@ fn oca_rows(v: &[i32; 10], colour: Rgb, w: usize) -> Vec<String> {
             _ => "    ",
         };
         let mut row = style::rgb(&format!(" {label} "), Some(DIM), None, "");
-        for c in line.chars() {
+        for (i, c) in line.chars().enumerate() {
             row.push_str(&match c {
+                _ if pixels => " ".into(),
                 '\u{2800}' if r == data::OCA_ROWS / 2 => style::rgb("╌", Some(DIM), None, ""),
                 '\u{2800}' => " ".into(),
-                c => style::rgb(&c.to_string(), Some(colour), None, ""),
+                c => style::rgb(&c.to_string(), Some(shades[i / data::OCA_STEP]), None, ""),
             });
         }
-        let used = 6 + 10 * data::OCA_STEP;
-        rows.push(if used > w { fit(" ", w) } else { row + &" ".repeat(w - used) });
+        rows.push(row + &" ".repeat(w.saturating_sub(OCA_W)));
     }
-    let letters: String = ('A'..='J').map(|c| format!("{c:^w$}", w = data::OCA_STEP)).collect();
-    rows.push(style::rgb(&fit(&format!("      {letters}"), w), Some(DIM), None, ""));
+    let mut letters = "      ".to_string();
+    for (i, c) in ('A'..='J').enumerate() {
+        letters.push_str(&style::rgb(&format!("{c:^w$}", w = data::OCA_STEP), Some(shades[i]), None, "b"));
+    }
+    rows.push(letters + &" ".repeat(w.saturating_sub(OCA_W)));
     rows.push(" ".repeat(w));
     rows
 }

@@ -171,6 +171,90 @@ pub fn oca_graph(v: &[i32; 10]) -> Vec<String> {
     }).collect()).collect()
 }
 
+/// A colour per trait: A B C lighter than the person's colour, D light
+/// grey, E F G the colour itself, H I J darker.
+pub fn oca_shades(c: (u8, u8, u8)) -> [(u8, u8, u8); 10] {
+    let mix = |to: f64, k: f64| {
+        let m = |v: u8| (v as f64 + (to - v as f64) * k).round() as u8;
+        (m(c.0), m(c.1), m(c.2))
+    };
+    let (light, dark) = (mix(255.0, 0.5), mix(0.0, 0.45));
+    [light, light, light, (205, 205, 210), c, c, c, dark, dark, dark]
+}
+
+/// The scores as a smooth line in real pixels, on a see-through canvas
+/// of the graph's cells: a dashed line at zero, the line in each trait's
+/// shade, a dot on every score.
+pub fn oca_canvas(v: &[i32; 10], shades: &[(u8, u8, u8); 10], cell: Option<(u16, u16)>) -> glow::Canvas {
+    let mut cv = glow::Canvas::sized((10 * OCA_STEP) as u16, OCA_ROWS as u16, cell);
+    cv.see_through();
+    let (w, h) = (cv.w as f64, cv.h as f64);
+    let step = w / 10.0;
+    let p: Vec<(f64, f64)> = (0..10).map(|i| ((i as f64 + 0.5) * step, 5.0 + (100 - v[i]) as f64 / 200.0 * (h - 10.0))).collect();
+    let zero = (h / 2.0).round() as i64;
+    for x in 0..cv.w as i64 {
+        if x % 9 < 5 {
+            cv.blend(x, zero, (140, 140, 150), 0.7);
+        }
+    }
+    let m = tangents(&p);
+    let (xa, xb) = (p[0].0.floor() as i64, p[9].0.ceil() as i64);
+    let ys: Vec<f64> = (xa..=xb).map(|x| spline(&p, &m, x as f64 + 0.5)).collect();
+    for i in 1..ys.len() {
+        let x = xa as f64 + i as f64;
+        let rgb = shades[(((x - p[0].0) / step).round().max(0.0) as usize).min(9)];
+        cv.line((x - 0.5, ys[i - 1]), (x + 0.5, ys[i]), 2.4, rgb, 1.0);
+    }
+    for (i, q) in p.iter().enumerate() {
+        cv.disc(q.0, q.1, 3.6, shades[i], 1.0);
+    }
+    cv
+}
+
+/// Slopes at each point for a curve that never swings past the points
+/// (Fritsch-Carlson): a smooth line that shows no high the scores had not.
+fn tangents(p: &[(f64, f64)]) -> Vec<f64> {
+    let n = p.len();
+    let d: Vec<f64> = (0..n - 1).map(|i| (p[i + 1].1 - p[i].1) / (p[i + 1].0 - p[i].0)).collect();
+    let mut m = vec![0.0; n];
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for i in 1..n - 1 {
+        m[i] = if d[i - 1] * d[i] <= 0.0 { 0.0 } else { (d[i - 1] + d[i]) / 2.0 };
+    }
+    for i in 0..n - 1 {
+        if d[i] == 0.0 {
+            m[i] = 0.0;
+            m[i + 1] = 0.0;
+            continue;
+        }
+        let (a, b) = (m[i] / d[i], m[i + 1] / d[i]);
+        let s = a * a + b * b;
+        if s > 9.0 {
+            let t = 3.0 / s.sqrt();
+            m[i] = t * a * d[i];
+            m[i + 1] = t * b * d[i];
+        }
+    }
+    m
+}
+
+/// The curve's height at `x`.
+fn spline(p: &[(f64, f64)], m: &[f64], x: f64) -> f64 {
+    let i = p.partition_point(|q| q.0 <= x);
+    if i == 0 {
+        return p[0].1;
+    }
+    if i >= p.len() {
+        return p[p.len() - 1].1;
+    }
+    let (a, b) = (p[i - 1], p[i]);
+    let h = b.0 - a.0;
+    let t = (x - a.0) / h;
+    let (t2, t3) = (t * t, t * t * t);
+    (2.0 * t3 - 3.0 * t2 + 1.0) * a.1 + (t3 - 2.0 * t2 + t) * h * m[i - 1] + (-2.0 * t3 + 3.0 * t2) * b.1 + (t3 - t2) * h * m[i]
+}
+
 /// A goal or a step with its box: (done, the text without the box).
 pub fn boxed(item: &str) -> (bool, &str) {
     for (mark, done) in [("[x]", true), ("[X]", true), ("[ ]", false), ("[_]", false)] {
@@ -320,6 +404,27 @@ mod tests {
         assert_eq!(p.oca(), None);
         p.set_field("oca", "1 2 3 4 5 6 7 8 9 150");
         assert_eq!(p.oca(), None);
+    }
+
+    #[test]
+    fn the_pixel_graph_has_a_shade_per_group_and_stays_in_its_box() {
+        let shades = oca_shades((0xff, 0x88, 0x00));
+        assert_eq!(shades[0], shades[2]);
+        assert_eq!(shades[4], (0xff, 0x88, 0x00));
+        assert_eq!(shades[3], (205, 205, 210));
+        assert_ne!(shades[0], shades[4]);
+        assert_ne!(shades[4], shades[7]);
+        let v = [35, -20, 60, 10, -45, 70, 25, -10, 40, 55];
+        let cv = oca_canvas(&v, &shades, Some((13, 28)));
+        assert_eq!((cv.w, cv.h), (390, 140));
+        let at = |x: usize, y: usize| { let i = (y * cv.w + x) * 4; (cv.rgba[i], cv.rgba[i + 1], cv.rgba[i + 2], cv.rgba[i + 3]) };
+        // The dot of D is light grey, and the corner is see-through.
+        let (dx, dy) = (136, (5.0 + 90.0 / 200.0 * 130.0) as usize);
+        assert_eq!(at(dx, dy), (205, 205, 210, 255));
+        assert_eq!(at(0, 0).3, 0);
+        if let Ok(file) = std::env::var("OCA_DUMP") {
+            std::fs::write(file, cv.png()).unwrap();
+        }
     }
 
     #[test]

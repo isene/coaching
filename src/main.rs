@@ -896,7 +896,7 @@ impl App {
             // The OCA test, when the card has one and the page has room.
             // In real pixels where the terminal shows pictures, in braille elsewhere.
             let oca = self.person().and_then(Person::oca).filter(|_| body >= 20 && left > OCA_W);
-            let pixels = oca.is_some() && self.oca_display.get_or_insert_with(glow::Display::new).supported();
+            let pixels = oca.is_some() && self.oca_display.get_or_insert_with(glow::Display::new).real_pixels();
             let mut rows_left = match oca {
                 Some(v) => oca_rows(&v, colour, left.saturating_sub(1), pixels),
                 None => Vec::new(),

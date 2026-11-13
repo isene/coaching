@@ -36,6 +36,8 @@ pub struct Person {
     /// The `colour:` line's value, kept off the card: the whole page
     /// shows the colour, and `c` changes it.
     pub colour_hex: Option<String>,
+    /// The `oca:` line's value, kept off the card too: the graph shows it.
+    pub oca_line: Option<String>,
 }
 
 impl Person {
@@ -53,10 +55,16 @@ impl Person {
                 continue;
             }
             if part == CARD && !line.starts_with([' ', '\t']) {
-                if let Some((k, v)) = line.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("colour")) {
-                    let _ = k;
-                    p.colour_hex = Some(v.trim().to_string());
-                    continue;
+                match line.split_once(':').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())) {
+                    Some((k, v)) if k == "colour" => {
+                        p.colour_hex = Some(v);
+                        continue;
+                    }
+                    Some((k, v)) if k == "oca" => {
+                        p.oca_line = Some(v);
+                        continue;
+                    }
+                    _ => {}
                 }
             }
             // A line that starts with a space goes on with the item above.
@@ -73,7 +81,10 @@ impl Person {
 
     pub fn text(&self) -> String {
         let mut out = String::new();
-        let colour = self.colour_hex.as_ref().map(|c| format!("colour: {c}\n")).unwrap_or_default();
+        let mut colour = self.colour_hex.as_ref().map(|c| format!("colour: {c}\n")).unwrap_or_default();
+        if let Some(o) = &self.oca_line {
+            colour.push_str(&format!("oca: {o}\n"));
+        }
         for (i, items) in self.parts.iter().enumerate() {
             if i != CARD {
                 out.push_str(&format!("\n# {}\n", HEADS[i]));
@@ -98,6 +109,9 @@ impl Person {
         if key.eq_ignore_ascii_case("colour") {
             return self.colour_hex.as_deref();
         }
+        if key.eq_ignore_ascii_case("oca") {
+            return self.oca_line.as_deref();
+        }
         self.parts[CARD].iter().find_map(|l| {
             let (k, v) = l.split_once(':')?;
             k.trim().eq_ignore_ascii_case(key).then_some(v.trim())
@@ -107,6 +121,10 @@ impl Person {
     pub fn set_field(&mut self, key: &str, value: &str) {
         if key.eq_ignore_ascii_case("colour") {
             self.colour_hex = Some(value.to_string());
+            return;
+        }
+        if key.eq_ignore_ascii_case("oca") {
+            self.oca_line = Some(value.to_string());
             return;
         }
         let line = format!("{key}: {value}");
@@ -389,6 +407,10 @@ mod tests {
         assert_eq!(p.oca(), None);
         p.set_field("oca", "2026-11-10 100, 100 100 100 100 -100 -100 -100 -100 -100");
         let v = p.oca().unwrap();
+        // The line stays off the card and goes back in the file under the colour.
+        assert!(!p.parts[CARD].iter().any(|l| l.starts_with("oca")));
+        assert!(p.text().starts_with("name: Alice Example\ncolour: #88aaff\noca: 2026-11-10 100,"));
+        assert_eq!(Person::parse(&p.text()), p);
         assert_eq!(v, [100, 100, 100, 100, 100, -100, -100, -100, -100, -100]);
         let g = oca_graph(&v);
         assert_eq!(g.len(), OCA_ROWS);

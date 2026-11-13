@@ -98,7 +98,8 @@ born: 1990
   scores, traits A to J, each from -100 to 100. The page draws it as a
   small smooth graph under the picture, with a shade for A to C, one for
   E to G, one for H to J, and D in light grey (braille dots in a terminal
-  that shows no images). A date on the line is fine.
+  that shows no images). A date on the line is fine. The card
+  leaves the line out; `E` opens the whole file to change it.
 - To remove a person, delete the file.
 
 ## The calendar
